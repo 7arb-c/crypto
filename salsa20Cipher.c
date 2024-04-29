@@ -1,70 +1,73 @@
 #include <stdio.h>
+#include <sodium.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <openssl/md5.h>
-#include <openssl/salsa.h>
 
-#define BUFFER_SIZE 1024
-
-void generateKey(const char *input_key, uint8_t *key) {
-    // Generate MD5 hash of the input key
-    unsigned char hash[MD5_DIGEST_LENGTH];
-    MD5((const unsigned char *)input_key, strlen(input_key), hash);
-
-    // Use the first 32 bytes of the MD5 hash as the key
-    memcpy(key, hash, 32);
+// Function to hash the passphrase to generate a 256-bit key
+void derive_key(unsigned char *key, const char *passphrase) {
+    crypto_generichash(key, crypto_generichash_BYTES, (const unsigned char *)passphrase, strlen(passphrase), NULL, 0);
 }
 
-void encryptFile(const char *file_name, const uint8_t *key) {
-    FILE *in_file = fopen(file_name, "rb");
-    if (!in_file) {
-        perror("Error opening input file");
-        return;
+// Encrypt or decrypt the data
+void salsa20_encrypt_decrypt(const char *input_file_name, const char *output_file_name, const unsigned char *key) {
+    // Open the input file
+    FILE *input_file = fopen(input_file_name, "rb");
+    if (!input_file) {
+        perror("Failed to open input file");
+        exit(EXIT_FAILURE);
     }
 
-    FILE *out_file = fopen(strcat(file_name, ".enc"), "wb");
-    if (!out_file) {
-        perror("Error opening output file");
-        fclose(in_file);
-        return;
+    // Open the output file
+    FILE *output_file = fopen(output_file_name, "wb");
+    if (!output_file) {
+        perror("Failed to open output file");
+        fclose(input_file);
+        exit(EXIT_FAILURE);
     }
 
-    uint8_t nonce[8] = {0}; // Nonce is set to all zeros
-    uint8_t counter[8] = {0}; // Counter is set to all zeros
-    salsa20_ctx ctx;
-    salsa20_keysetup(&ctx, key, 256, 8);
-    salsa20_ivsetup(&ctx, nonce, counter);
+    unsigned char buffer[4096];
+    unsigned char nonce[crypto_stream_salsa20_NONCEBYTES] = {0}; // Using a zero nonce for simplicity, use a unique nonce in real applications
+    unsigned long long nonce_counter = 0;
+    size_t read_size;
 
-    uint8_t buffer[BUFFER_SIZE];
-    size_t bytes_read;
-
-    while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, in_file)) > 0) {
-        salsa20_encrypt_bytes(&ctx, buffer, buffer, bytes_read);
-        fwrite(buffer, 1, bytes_read, out_file);
+    // Read and process each block of the file
+    while ((read_size = fread(buffer, 1, sizeof(buffer), input_file)) > 0) {
+        crypto_stream_salsa20_xor_ic(buffer, buffer, read_size, nonce, nonce_counter, key);
+        fwrite(buffer, 1, read_size, output_file);
+        nonce_counter++;
     }
 
-    fclose(in_file);
-    fclose(out_file);
-
-    printf("File encrypted successfully.\n");
+    // Clean up
+    fclose(input_file);
+    fclose(output_file);
 }
 
 int main() {
-    char file_name[256];
-    printf("Enter the name of the file to encrypt: ");
-    fgets(file_name, sizeof(file_name), stdin);
-    file_name[strcspn(file_name, "\n")] = '\0'; // Remove newline character
+    if (sodium_init() < 0) {
+        fprintf(stderr, "Cannot initialize libsodium\n");
+        return EXIT_FAILURE;
+    }
 
-    char input_key[256];
-    printf("Enter the encryption key: ");
-    fgets(input_key, sizeof(input_key), stdin);
-    input_key[strcspn(input_key, "\n")] = '\0'; // Remove newline character
+    char passphrase[1024];
+    unsigned char key[crypto_generichash_BYTES]; // 32 bytes for a 256-bit key
 
-    uint8_t key[32];
-    generateKey(input_key, key);
+    printf("Enter passphrase: ");
+    if (!fgets(passphrase, sizeof(passphrase), stdin)) {
+        fprintf(stderr, "Failed to read passphrase\n");
+        return EXIT_FAILURE;
+    }
 
-    encryptFile(file_name, key);
+    // Remove newline character
+    passphrase[strcspn(passphrase, "\n")] = 0;
 
-    return 0;
+    derive_key(key, passphrase);
+
+    const char *input_file_name = "input.txt";
+    const char *output_file_name = "output.txt";
+
+    salsa20_encrypt_decrypt(input_file_name, output_file_name, key);
+
+    printf("File encrypted successfully\n");
+
+    return EXIT_SUCCESS;
 }
