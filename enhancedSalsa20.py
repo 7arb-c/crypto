@@ -64,7 +64,7 @@ class Encryption:
 
     def encrypt(self):
 
-        """Encrypt the file content."""
+        """Encrypt the file content and write to new file then delete the original."""
 
         with open(self.file_path, 'rb') as file:
 
@@ -90,13 +90,35 @@ class Encryption:
 
         
 
-        return final_data
+        # Write encrypted data to a new file and delete the original
+
+        encrypted_file_path = self.file_path + ".enc"
+
+        with open(encrypted_file_path, 'wb') as encrypted_file:
+
+            encrypted_file.write(final_data)
+
+        
+
+        # Delete the original file securely by overwriting
+
+        self._secure_delete_original()
 
 
 
-    def decrypt(self, encrypted_data):
+        return encrypted_file_path
 
-        """Decrypt the encrypted content."""
+
+
+    def decrypt(self, encrypted_file_path):
+
+        """Decrypt the encrypted content and restore the original file."""
+
+        with open(encrypted_file_path, 'rb') as file:
+
+            encrypted_data = file.read()
+
+
 
         xored_data = self._xor_data(encrypted_data, self.full_key)
 
@@ -106,7 +128,19 @@ class Encryption:
 
         
 
-        return original_data
+        original_file_path = encrypted_file_path.rstrip(".enc")
+
+        with open(original_file_path, 'wb') as original_file:
+
+            original_file.write(original_data)
+
+        
+
+        os.remove(encrypted_file_path)
+
+        
+
+        return original_file_path
 
 
 
@@ -150,6 +184,22 @@ class Encryption:
 
 
 
+    def _secure_delete_original(self):
+
+        """Securely delete the original file by overwriting."""
+
+        with open(self.file_path, 'rb+') as file:
+
+            length = file.tell()
+
+            file.seek(0)
+
+            file.write(os.urandom(length))  # Overwrite with random data
+
+        os.remove(self.file_path)  # Finally, delete the file
+
+
+
 # Example of setting file and key, encrypting and decrypting
 
 # encryption = Encryption()
@@ -158,10 +208,10 @@ class Encryption:
 
 # encryption.set_file('example.txt')
 
-# encrypted_content = encryption.encrypt()
+# encrypted_file = encryption.encrypt()
 
-# decrypted_content = encryption.decrypt(encrypted_content)
+# decrypted_file = encryption.decrypt(encrypted_file)
 
-# assert decrypted_content == open('example.txt', 'rb').read(), "Decryption failed"
+# assert open(decrypted_file, 'rb').read() == open('example.txt', 'rb').read(), "Decryption failed"
 
 
